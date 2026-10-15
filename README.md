@@ -1,6 +1,6 @@
 
 
-Readme · MD
+
 Sokoban — Projet 1 (Problem Solving, M1 MIV, USTHB 2026/2027)
 Modélisation et résolution du puzzle Sokoban avec BFS, plus une interface Pygame.
 
