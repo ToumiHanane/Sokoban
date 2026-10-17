@@ -10,7 +10,7 @@ Formulation du problème (cf. Chapitre 1, section 1.2.1) :
 - Test de but   : isGoal() -> toutes les caisses sont sur des cibles
   *- Coût d'un pas : 1 (donc coût du chemin = nombre d'actions)
  *
-Codage des cases (imposé par l'énoncé) :
+Codage des cases  :
 'O' mur | ' ' vide | 'S' cible | 'R' joueur | 'B' caisse
 '.' joueur sur une cible | '*' caisse sur une cible
 """
@@ -45,13 +45,7 @@ class SokobanPuzzle:
     # init()
     # ------------------------------------------------------------------
     def __init__(self, grid):
-        """Crée un état à partir d'une liste de chaînes (une chaîne = une ligne).
- 
-        Exemple :
-            SokobanPuzzle(["OOOOOO",
-                           "ORB SO",
-                           "OOOOOO"])
-        """
+        """Crée un état à partir d'une liste de chaînes (une chaîne = une ligne).  """
         rows = [str(row) for row in grid]
         if not rows:
             raise ValueError("La grille est vide.")
