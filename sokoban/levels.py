@@ -56,4 +56,4 @@ LEVELS = [
      "OOOOOOOO"],
 ]
 
-LEVEL_NAMES = ["Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Fig.7 - Ex 1", "Fig.7 - Ex 2"]
+LEVEL_NAMES = ["Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "level 6", "level 7"]

@@ -18,6 +18,7 @@ from sokoban.puzzle import SokobanPuzzle, BOX, BOX_ON_TARGET, TARGET, WALL
 from sokoban.levels import LEVELS, LEVEL_NAMES
 from sokoban.solvers import default_solvers
 from . import ui
+from .audio import Audio
 from .ui import (draw_text, draw_text_wave, draw_button, draw_panel, draw_progress,
                  HOT_PINK, PURPLE, DARK_PURPLE, PINK, WHITE, GOLD, LAVENDER, MINT)
 
@@ -159,6 +160,7 @@ def draw_board(surface, grid, inside, walls, assets, sprites, tile, origin, t=No
 # ======================================================================
 class App:
     def __init__(self, solvers=None):
+        pygame.mixer.pre_init(22050, -16, 1, 512)
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("Sokoban Game")
@@ -173,6 +175,7 @@ class App:
         self.fonts = {"huge": ui.load_font(ASSET_DIR, 40), "title": ui.load_font(ASSET_DIR, 30),
                       "big": ui.load_font(ASSET_DIR, 24), "normal": ui.load_font(ASSET_DIR, 16),
                       "small": ui.load_font(ASSET_DIR, 10)}
+        self.audio = Audio(os.path.join(ASSET_DIR, "sounds"))
         self.cursor_img = self.assets.fit("cursor", 40, 40)
         self.cursor_hotspot = self.find_cursor_hotspot()
 
@@ -216,12 +219,13 @@ class App:
     def build_layout(self):
         R = pygame.Rect
         self.MENU = R(20, 14, 150, 64)
+        self.SOUND = R(WIDTH - 74, 14, 54, 54)
         self.START = R(WIDTH // 2 - 150, 430, 300, 90)
         # niveaux : grille 4 x 2
         cw, ch, gap = 232, 200, 20
         x0 = (WIDTH - (4 * cw + 3 * gap)) // 2
         self.CARDS = [R(x0 + (i % 4) * (cw + gap), 120 + (i // 4) * (ch + gap), cw, ch)
-                      for i in range(len(LEVELS))]
+                    for i in range(len(LEVELS))]
         self.SELECT = R(WIDTH // 2 - 150, 600, 300, 72)
         # jeu
         self.BOARD_PANEL = R(40, 96, 690, 452)
@@ -235,7 +239,7 @@ class App:
         self.SPEED_PLUS = R(self.HUD.right - 84, self.HUD.bottom - 74, 60, 46)
         # fin de niveau
         self.DONE = {name: R(100 + i * 230, 610, 210, 70)
-                     for i, name in enumerate(["LEVELS", "AGAIN", "COMPARE", "NEXT"])}
+                    for i, name in enumerate(["LEVELS", "AGAIN", "COMPARE", "NEXT"])}
         # comparaison
         self.CMP_PANEL = R(60, 110, 980, 480)
         self.CMP_BACK = R(WIDTH // 2 - 330, 630, 300, 70)
@@ -287,11 +291,13 @@ class App:
             return False
         new = successors[action]
         gained = [(r, c) for r, row in enumerate(new.grid) for c, ch in enumerate(row)
-                  if ch == BOX_ON_TARGET and self.puzzle.grid[r][c] != BOX_ON_TARGET]
+                if ch == BOX_ON_TARGET and self.puzzle.grid[r][c] != BOX_ON_TARGET]
+        pushed = self.puzzle.cell(*new.player) in (BOX, BOX_ON_TARGET)
         self.history.append(self.puzzle)
         self.puzzle = new
         self.moves += 1
         self.last_move = self.t
+        self.audio.play("target" if gained else "push" if pushed else "move")
         if gained:                                       # une caisse vient d'arriver sur une cible
             tile, ox, oy = self.board_geometry()
             r, c = gained[0]
@@ -305,6 +311,7 @@ class App:
         if self.history and not self.autoplay and self.win_time is None:
             self.puzzle = self.history.pop()
             self.moves -= 1
+            self.audio.play("undo")
 
     # ------------------------------------------------------------------
     # Solveurs en arrière-plan
@@ -368,7 +375,17 @@ class App:
             self.handle_key(event.key)
 
     def handle_click(self, pos):
-        hit = lambda rect: rect.collidepoint(pos)
+        def hit(rect):
+            ok = rect.collidepoint(pos)
+            if ok:
+                self.audio.play("click")
+            return ok
+
+        if self.SOUND.collidepoint(pos):
+            self.audio.toggle()
+            if not self.audio.muted:
+                self.audio.play("click")
+            return
         if self.scene != "menu" and hit(self.MENU):
             self.go("menu")
             return
@@ -428,10 +445,13 @@ class App:
     def handle_key(self, key):
         if key == pygame.K_ESCAPE:
             self.go("menu")
+        elif key == pygame.K_m:
+                self.audio.toggle()
         elif self.scene == "game":
             if key in KEY_TO_ACTION and not self.autoplay and not self.thinking() \
                     and self.win_time is None:
-                self.play_action(KEY_TO_ACTION[key])
+                if not self.play_action(KEY_TO_ACTION[key]):
+                    self.audio.play("bump")
             elif key == pygame.K_u:
                 self.undo()
             elif key == pygame.K_r:
@@ -445,12 +465,15 @@ class App:
     def update(self):
         self.ambient.update(self.dt)
         self.particles.update(self.dt)
+        self.audio.update()
 
         for key, job in list(self.jobs.items()):             # calculs terminés ?
             if job["done"]:
                 self.results[key] = job["result"]
                 self.result_time[key] = self.t
                 del self.jobs[key]
+                if self.scene in ("game", "compare"):
+                    self.audio.play("ding")
                 if job["result"].get("error"):
                     self.toast(f"{key[1]}: error ({job['result']['error'][:30]})")
                 if self.pending == key:
@@ -470,6 +493,7 @@ class App:
                 self.autoplay = False
         if self.win_time is not None and self.t - self.win_time > 1000:
             self.particles.confetti(WIDTH)
+            self.audio.play("win")
             self.go("done")
 
     # ------------------------------------------------------------------
@@ -482,9 +506,29 @@ class App:
         self.ambient.draw(self.screen, self.t)
         getattr(self, "draw_" + self.scene)(mouse)
         self.particles.draw(self.screen)
+        self.draw_sound_button(mouse)
         if pygame.mouse.get_focused():
             hx, hy = self.cursor_hotspot
             self.screen.blit(self.cursor_img, (mouse[0] - hx, mouse[1] - hy))
+
+    def draw_sound_button(self, mouse):
+        r, s = self.SOUND, self.screen
+        hover = r.collidepoint(mouse)
+        rr = r.move(0, -3 if hover else 0)
+        pygame.draw.rect(s, PURPLE, r.move(0, 4), border_radius=14)
+        pygame.draw.rect(s, PURPLE, rr, border_radius=14)
+        pygame.draw.rect(s, ui.PINK_HOVER if hover else PINK, rr.inflate(-6, -6), border_radius=11)
+        x, y = rr.x, rr.y
+        c = DARK_PURPLE
+        pygame.draw.rect(s, c, (x + 13, y + 21, 8, 12))
+        pygame.draw.polygon(s, c, [(x + 21, y + 21), (x + 29, y + 13),
+                                    (x + 29, y + 41), (x + 21, y + 33)])
+        if self.audio.muted or not self.audio.enabled:
+            pygame.draw.line(s, (214, 70, 110), (x + 33, y + 20), (x + 45, y + 34), 4)
+            pygame.draw.line(s, (214, 70, 110), (x + 45, y + 20), (x + 33, y + 34), 4)
+        else:
+            pygame.draw.line(s, c, (x + 34, y + 22), (x + 34, y + 32), 3)
+            pygame.draw.line(s, c, (x + 40, y + 17), (x + 40, y + 37), 3)
 
     def draw_menu_button(self, mouse):
         self.screen.blit(self.assets.exact("button_menu", self.MENU.size), self.MENU)
@@ -493,7 +537,7 @@ class App:
 
     def title(self, text, y, font="title", amp=6):
         draw_text_wave(self.screen, text, self.fonts[font], HOT_PINK, (WIDTH // 2, y),
-                       self.t, amp=amp, shadow=PURPLE, offset=4)
+            self.t, amp=amp, shadow=PURPLE, offset=4)
 
     def twinkle(self, x, y, phase, px=3):
         a = 120 + 135 * (0.5 + 0.5 * math.sin(self.t / 300 + phase))
@@ -534,18 +578,18 @@ class App:
             chosen, hover = i == self.selected, rect.collidepoint(mouse)
             r = rect.move(0, -6 if hover or chosen else 0)
             draw_panel(self.screen, r, fill=WHITE if hover else ui.PANEL_FILL,
-                       border=HOT_PINK if chosen else PURPLE)
+                    border=HOT_PINK if chosen else PURPLE)
             grid = self.starts[i].grid
             tile = fit_tile(len(grid), len(grid[0]), r.w - 40, 110, 36)
             ox = r.centerx - len(grid[0]) * tile // 2
             oy = r.y + 18 + (110 - len(grid) * tile) // 2
             draw_board(self.screen, grid, self.inside[i], self.walls[i], self.assets,
-                       self.sprites, tile, (ox, oy))
+                    self.sprites, tile, (ox, oy))
             draw_text(self.screen, LEVEL_NAMES[i], f["normal"], DARK_PURPLE,
-                      (r.centerx, r.bottom - 52))
+                    (r.centerx, r.bottom - 52))
             boxes = count_cells(grid, "B*")
             draw_text(self.screen, f"{boxes} cake{'s' if boxes > 1 else ''}", f["small"],
-                      PURPLE, (r.centerx, r.bottom - 26))
+                    PURPLE, (r.centerx, r.bottom - 26))
             if chosen:
                 star = self.sprites.get("star", 4)
                 self.screen.blit(star, star.get_rect(center=(r.right - 22, r.y + 22
@@ -564,14 +608,14 @@ class App:
         since = self.t - self.last_move
         hop = int(math.sin(min(1.0, since / 220) * math.pi) * tile * 0.14) if since < 220 else 0
         draw_board(s, self.puzzle.grid, self.inside[self.level], self.walls[self.level],
-                   self.assets, self.sprites, tile, (ox, oy), t=self.t, hop=hop)
+                self.assets, self.sprites, tile, (ox, oy), t=self.t, hop=hop)
 
         # cakes restants
         left = count_cells(self.puzzle.grid, "B")
         h = self.sprites.get("heart", 3)
         s.blit(h, (self.BOARD_PANEL.x + 22, self.BOARD_PANEL.y + 18))
         draw_text(s, f"Cakes left: {left}", f["small"], DARK_PURPLE,
-                  (self.BOARD_PANEL.x + 62, self.BOARD_PANEL.y + 22), anchor="midleft")
+                (self.BOARD_PANEL.x + 62, self.BOARD_PANEL.y + 22), anchor="midleft")
 
         if self.thinking():
             self.draw_thinking(self.BOARD_PANEL, f"{self.pending[1]} is thinking")
