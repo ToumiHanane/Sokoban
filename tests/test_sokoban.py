@@ -2,7 +2,7 @@
 """Tests de sokoban.py  --  lancer avec :  python test_sokoban.py"""
 import unittest
  
-from sokoban import SokobanPuzzle
+from sokoban.puzzle import SokobanPuzzle
  
  
 def succ(state):
